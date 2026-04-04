@@ -1,7 +1,11 @@
+import json
+from xml.dom import minidom
+
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QTableWidget, QTableWidgetItem,
-    QLabel, QHeaderView, QAbstractItemView
+    QLabel, QHeaderView, QAbstractItemView, QTextEdit,
+    QSplitter
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontMetrics
@@ -16,9 +20,10 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("AutoLogUp")
-        self.resize(1400, 850)
+        self.resize(1400, 900)
 
         self.controller = AppController(LogService())
+        self.current_logs = []
 
         self.setup_ui()
         self.apply_styles()
@@ -37,12 +42,7 @@ class MainWindow(QMainWindow):
         )
 
         top_container = QWidget()
-        top_container.setStyleSheet("""
-            QWidget {
-                background-color: #1f2937;
-                border-radius: 12px;
-            }
-        """)
+        top_container.setObjectName("topContainer")
 
         top_bar = QHBoxLayout()
         top_bar.setContentsMargins(12, 12, 12, 12)
@@ -52,22 +52,15 @@ class MainWindow(QMainWindow):
         top_container.setLayout(top_bar)
 
         self.table = QTableWidget(0, 1)
-        self.table.clear()
         self.table.setColumnCount(1)
         self.table.setHorizontalHeaderLabels(["Log"])
 
-        # Kein ...
         self.table.setTextElideMode(Qt.ElideNone)
-
-        # Keine Umbrüche
         self.table.setWordWrap(False)
-
-        # Scrollen
         self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
 
-        # Verhalten
         self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
@@ -75,23 +68,49 @@ class MainWindow(QMainWindow):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
-        # Header
         header = self.table.horizontalHeader()
         header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.Interactive)
 
-        # Monospace-Font für Logs
-        font = QFont("Consolas")
-        font.setPointSize(10)
-        self.table.setFont(font)
+        table_font = QFont("Consolas")
+        table_font.setPointSize(10)
+        self.table.setFont(table_font)
 
-        # Startbreite
-        self.table.setColumnWidth(0, 2000)
+        self.table.itemSelectionChanged.connect(self.on_table_selection_changed)
+
+        detail_container = QWidget()
+        detail_container.setObjectName("detailContainer")
+
+        detail_layout = QVBoxLayout()
+        detail_layout.setContentsMargins(12, 12, 12, 12)
+        detail_layout.setSpacing(8)
+
+        self.detail_title = QLabel("Log Details")
+        self.detail_title.setObjectName("detailTitle")
+
+        self.detail_text = QTextEdit()
+        self.detail_text.setReadOnly(True)
+        self.detail_text.setLineWrapMode(QTextEdit.NoWrap)
+
+        detail_font = QFont("Consolas")
+        detail_font.setPointSize(10)
+        self.detail_text.setFont(detail_font)
+
+        detail_layout.addWidget(self.detail_title)
+        detail_layout.addWidget(self.detail_text)
+        detail_container.setLayout(detail_layout)
+
+        self.splitter = QSplitter(Qt.Vertical)
+        self.splitter.addWidget(self.table)
+        self.splitter.addWidget(detail_container)
+        self.splitter.setStretchFactor(0, 3)
+        self.splitter.setStretchFactor(1, 2)
+        self.splitter.setSizes([520, 260])
 
         self.stats_label = QLabel("No data loaded")
 
         main_layout.addWidget(top_container)
-        main_layout.addWidget(self.table)
+        main_layout.addWidget(self.splitter)
         main_layout.addWidget(self.stats_label)
 
         central.setLayout(main_layout)
@@ -106,6 +125,23 @@ class MainWindow(QMainWindow):
             QWidget {
                 color: #E5E7EB;
                 font-size: 13px;
+            }
+
+            QWidget#topContainer {
+                background-color: #1f2937;
+                border-radius: 12px;
+            }
+
+            QWidget#detailContainer {
+                background-color: #0f172a;
+                border: 1px solid #374151;
+                border-radius: 12px;
+            }
+
+            QLabel#detailTitle {
+                color: #93C5FD;
+                font-size: 14px;
+                font-weight: bold;
             }
 
             QPushButton {
@@ -144,8 +180,8 @@ class MainWindow(QMainWindow):
             QTableWidget {
                 background-color: #111827;
                 alternate-background-color: #1f2937;
+                border: 1px solid #374151;
                 border-radius: 12px;
-                gridline-color: #374151;
                 selection-background-color: #2563EB;
                 selection-color: white;
             }
@@ -156,6 +192,19 @@ class MainWindow(QMainWindow):
                 padding: 8px;
                 border: none;
                 font-weight: bold;
+            }
+
+            QTextEdit {
+                background-color: #020617;
+                color: #E5E7EB;
+                border: 1px solid #1e293b;
+                border-radius: 10px;
+                padding: 8px;
+            }
+
+            QSplitter::handle {
+                background-color: #1f2937;
+                height: 8px;
             }
 
             QScrollBar:horizontal {
@@ -221,25 +270,54 @@ class MainWindow(QMainWindow):
 
     def on_files_loaded(self, file_paths):
         logs = self.controller.load_files(file_paths)
+        self.current_logs = logs
 
         self.populate_table(logs)
+        self.detail_text.clear()
+        self.detail_text.setPlainText("Wähle eine Log-Zeile aus, um den vollständigen Inhalt zu sehen.")
         self.stats_label.setText(
             f"Loaded {len(file_paths)} files, {len(logs)} entries"
         )
 
+        if logs:
+            self.table.selectRow(0)
+
     def populate_table(self, logs):
+        visible_logs = logs[:500]
         self.table.setRowCount(0)
 
-        for log in logs[:500]:
+        for log in visible_logs:
             row = self.table.rowCount()
             self.table.insertRow(row)
 
             raw_text = log.raw if log.raw else ""
-            log_item = QTableWidgetItem(raw_text)
-            self.table.setItem(row, 0, log_item)
+            item = QTableWidgetItem(raw_text)
+            item.setToolTip(raw_text)
+            self.table.setItem(row, 0, item)
 
         self.table.resizeRowsToContents()
-        self._update_log_column_width(logs[:500])
+        self._update_log_column_width(visible_logs)
+
+    def on_table_selection_changed(self):
+        selected_indexes = self.table.selectionModel().selectedRows()
+
+        if not selected_indexes:
+            self.detail_text.clear()
+            return
+
+        row = selected_indexes[0].row()
+        visible_logs = self.current_logs[:500]
+
+        if row < 0 or row >= len(visible_logs):
+            self.detail_text.clear()
+            return
+
+        selected_log = visible_logs[row]
+        full_text = selected_log.raw if selected_log.raw else ""
+        source_file = selected_log.source_file if selected_log.source_file else ""
+
+        formatted_text = self._format_detail_text(full_text, source_file)
+        self.detail_text.setPlainText(formatted_text)
 
     def _update_log_column_width(self, logs):
         if not logs:
@@ -256,13 +334,40 @@ class MainWindow(QMainWindow):
             if text_width > max_width:
                 max_width = text_width
 
-        # etwas Puffer dazu
         max_width += 40
-
-        # harte Obergrenze gegen extreme Ausreißer
-        max_width = min(max_width, 20000)
-
-        # sinnvolle Mindestbreite
         max_width = max(max_width, 1200)
+        max_width = min(max_width, 50000)
 
         self.table.setColumnWidth(0, max_width)
+
+    def _format_detail_text(self, raw_text: str, source_file: str) -> str:
+        lower_source = source_file.lower()
+
+        if lower_source.endswith(".json"):
+            return self._pretty_json(raw_text)
+
+        if lower_source.endswith(".xml"):
+            return self._pretty_xml(raw_text)
+
+        return raw_text
+
+    def _pretty_json(self, raw_text: str) -> str:
+        try:
+            parsed = json.loads(raw_text)
+            return json.dumps(parsed, indent=4, ensure_ascii=False)
+        except Exception:
+            return raw_text
+
+    def _pretty_xml(self, raw_text: str) -> str:
+        try:
+            parsed = minidom.parseString(raw_text.encode("utf-8"))
+            pretty = parsed.toprettyxml(indent="    ")
+
+            lines = []
+            for line in pretty.splitlines():
+                if line.strip():
+                    lines.append(line)
+
+            return "\n".join(lines)
+        except Exception:
+            return raw_text
