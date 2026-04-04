@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QLabel, QHeaderView, QAbstractItemView
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QFontMetrics
 
 from core.controller.app_controller import AppController
 from core.services.log_service import LogService
@@ -52,20 +52,22 @@ class MainWindow(QMainWindow):
         top_container.setLayout(top_bar)
 
         self.table = QTableWidget(0, 1)
+        self.table.clear()
+        self.table.setColumnCount(1)
         self.table.setHorizontalHeaderLabels(["Log"])
 
-        # Wichtig: kein Abschneiden mit "..."
+        # Kein ...
         self.table.setTextElideMode(Qt.ElideNone)
 
-        # Wichtig: kein Zeilenumbruch
+        # Keine Umbrüche
         self.table.setWordWrap(False)
 
-        # Horizontaler Scrollbalken soll wirklich nutzbar sein
+        # Scrollen
         self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
 
-        # Tabellenverhalten
+        # Verhalten
         self.table.setAlternatingRowColors(True)
         self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
@@ -73,20 +75,18 @@ class MainWindow(QMainWindow):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
-        # Header-Verhalten:
-        # KEIN Stretch, sonst gibt es keinen echten horizontalen Overflow
+        # Header
         header = self.table.horizontalHeader()
         header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QHeaderView.Interactive)
 
-        # Spaltenbreiten:
-        # Log bewusst sehr breit, damit unten horizontal gescrollt werden kann
-        self.table.setColumnWidth(0, 3000)
-
-        # Monospace für Logs
+        # Monospace-Font für Logs
         font = QFont("Consolas")
         font.setPointSize(10)
         self.table.setFont(font)
+
+        # Startbreite
+        self.table.setColumnWidth(0, 2000)
 
         self.stats_label = QLabel("No data loaded")
 
@@ -221,9 +221,10 @@ class MainWindow(QMainWindow):
 
     def on_files_loaded(self, file_paths):
         logs = self.controller.load_files(file_paths)
+
         self.populate_table(logs)
         self.stats_label.setText(
-            f"Loaded {len(file_paths)} files, {len(logs)} lines"
+            f"Loaded {len(file_paths)} files, {len(logs)} entries"
         )
 
     def populate_table(self, logs):
@@ -233,7 +234,35 @@ class MainWindow(QMainWindow):
             row = self.table.rowCount()
             self.table.insertRow(row)
 
-            log_item = QTableWidgetItem(log["raw"])
+            raw_text = log.raw if log.raw else ""
+            log_item = QTableWidgetItem(raw_text)
             self.table.setItem(row, 0, log_item)
 
         self.table.resizeRowsToContents()
+        self._update_log_column_width(logs[:500])
+
+    def _update_log_column_width(self, logs):
+        if not logs:
+            self.table.setColumnWidth(0, 1200)
+            return
+
+        metrics = QFontMetrics(self.table.font())
+        max_width = 0
+
+        for log in logs:
+            raw_text = log.raw if log.raw else ""
+            text_width = metrics.horizontalAdvance(raw_text)
+
+            if text_width > max_width:
+                max_width = text_width
+
+        # etwas Puffer dazu
+        max_width += 40
+
+        # harte Obergrenze gegen extreme Ausreißer
+        max_width = min(max_width, 20000)
+
+        # sinnvolle Mindestbreite
+        max_width = max(max_width, 1200)
+
+        self.table.setColumnWidth(0, max_width)
