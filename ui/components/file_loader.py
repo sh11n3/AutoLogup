@@ -12,7 +12,13 @@ class FileLoaderButton(QPushButton):
             self,
             "Select Log Files",
             "",
-            "All Supported Files (*.log *.txt *.json *.csv *.xml *.sql)"
+            "All Supported Files (*.log *.txt *.json *.csv *.xml *.sql);;"
+            "Log Files (*.log *.txt);;"
+            "JSON Files (*.json);;"
+            "CSV Files (*.csv);;"
+            "XML Files (*.xml);;"
+            "SQL Files (*.sql);;"
+            "All Files (*)"
         )
 
         if files:

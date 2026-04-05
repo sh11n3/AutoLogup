@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from xml.dom import minidom
 
 from PySide6.QtWidgets import (
@@ -8,7 +9,7 @@ from PySide6.QtWidgets import (
     QSplitter, QPushButton, QComboBox, QToolButton
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QFontMetrics, QKeySequence, QShortcut
+from PySide6.QtGui import QFont, QFontMetrics, QKeySequence, QShortcut, QColor, QBrush
 
 from core.controller.app_controller import AppController
 from core.services.log_service import LogService
@@ -17,6 +18,16 @@ from ui.components.highlight_delegate import HighlightDelegate
 
 
 class MainWindow(QMainWindow):
+    FILE_COLOR_THEMES = [
+        ("#0b1f3a", "#12305a"),
+        ("#0d2a1a", "#16402a"),
+        ("#2a0d3a", "#40145a"),
+        ("#3a1f0b", "#5a3212"),
+        ("#3a0b0b", "#5a1212"),
+        ("#0b3a3a", "#125a5a"),
+        ("#2f2f2f", "#444444"),
+    ]
+
     def __init__(self):
         super().__init__()
 
@@ -114,7 +125,7 @@ class MainWindow(QMainWindow):
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
 
-        self.table.setAlternatingRowColors(True)
+        self.table.setAlternatingRowColors(False)
         self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -221,7 +232,7 @@ class MainWindow(QMainWindow):
             self.search_result_label.setText("0")
             return
 
-        visible_logs = self.current_logs[:500]
+        visible_logs = self.current_logs
 
         for row, log in enumerate(visible_logs):
             raw_text = log.raw if log.raw else ""
@@ -391,7 +402,6 @@ class MainWindow(QMainWindow):
 
             QTableWidget {
                 background-color: #111827;
-                alternate-background-color: #1f2937;
                 border: 1px solid #374151;
                 border-radius: 12px;
                 selection-background-color: #2563EB;
@@ -487,14 +497,26 @@ class MainWindow(QMainWindow):
         self.populate_table(logs)
         self.detail_text.clear()
         self.detail_text.setPlainText("Wähle eine Log-Zeile aus, um den vollständigen Inhalt zu sehen.")
+
+        file_counts = self.controller.get_last_file_entry_counts()
+        summary_parts = []
+        total_entries = 0
+
+        for path, count in file_counts.items():
+            total_entries += count
+            summary_parts.append(f"{Path(path).name}: {count}")
+
+        summary_text = " | ".join(summary_parts) if summary_parts else "No parsed entries"
         self.stats_label.setText(
-            f"Loaded {len(file_paths)} files, {len(logs)} entries"
+            f"Selected {len(file_paths)} files | Parsed entries: {total_entries} | {summary_text}"
         )
 
         self._rebuild_search_matches()
 
         if logs:
-            self.table.selectRow(0)
+            first_log_row = self._first_actual_log_row()
+            if first_log_row is not None:
+                self.table.selectRow(first_log_row)
 
     def apply_filter(self):
         query = self.filter_input.text().strip()
@@ -512,7 +534,9 @@ class MainWindow(QMainWindow):
         self._rebuild_search_matches()
 
         if filtered_logs:
-            self.table.selectRow(0)
+            first_log_row = self._first_actual_log_row()
+            if first_log_row is not None:
+                self.table.selectRow(first_log_row)
 
     def clear_filter(self):
         self.filter_input.clear()
@@ -528,24 +552,95 @@ class MainWindow(QMainWindow):
         self._rebuild_search_matches()
 
         if self.current_logs:
-            self.table.selectRow(0)
+            first_log_row = self._first_actual_log_row()
+            if first_log_row is not None:
+                self.table.selectRow(first_log_row)
 
     def populate_table(self, logs):
-        visible_logs = logs[:500]
+        visible_logs = logs
         self.table.setRowCount(0)
 
+        file_index_map = self._build_file_index_map(visible_logs)
+        file_row_counter = {}
+
+        last_source = None
+
         for log in visible_logs:
+            source_file = log.source_file if log.source_file else ""
+
+            if source_file != last_source:
+                header_row = self.table.rowCount()
+                self.table.insertRow(header_row)
+
+                file_name = Path(source_file).name if source_file else "(unknown file)"
+                header_item = QTableWidgetItem(f"=== FILE: {file_name} ===")
+                header_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                header_item.setBackground(QBrush(QColor("#0b1220")))
+                header_item.setForeground(QBrush(QColor("#93C5FD")))
+                self.table.setItem(header_row, 0, header_item)
+
+                last_source = source_file
+
             row = self.table.rowCount()
             self.table.insertRow(row)
 
             raw_text = log.raw if log.raw else ""
             item = QTableWidgetItem(raw_text)
             item.setToolTip(raw_text)
+
+            # 👉 file_index korrekt setzen
+            file_index = file_index_map.get(source_file, 0)
+
+            # 👉 Farbe bestimmen
+            color_palette = [
+                "#3B82F6",  # blau
+                "#22C55E",  # grün
+                "#A855F7",  # violett
+                "#F97316",  # orange
+                "#EF4444",  # rot
+                "#14B8A6",  # cyan
+            ]
+
+            file_color = color_palette[file_index % len(color_palette)]
+
+            # 👉 an Delegate übergeben
+            item.setData(Qt.UserRole, file_color)
+
+            file_index = file_index_map.get(source_file, 0)
+            row_in_file = file_row_counter.get(source_file, 0)
+
+            bg_color = self._get_row_background_color(file_index, row_in_file)
+
             self.table.setItem(row, 0, item)
+
+            file_row_counter[source_file] = row_in_file + 1
 
         self.table.resizeRowsToContents()
         self._update_log_column_width(visible_logs)
         self.table.viewport().update()
+
+    def _first_actual_log_row(self):
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item and not item.text().startswith("=== FILE: "):
+                return row
+        return None
+
+    def _build_file_index_map(self, logs):
+        file_index_map = {}
+        next_index = 0
+
+        for log in logs:
+            source_file = log.source_file if log.source_file else ""
+            if source_file not in file_index_map:
+                file_index_map[source_file] = next_index
+                next_index += 1
+
+        return file_index_map
+
+    def _get_row_background_color(self, file_index: int, row_in_file: int) -> QColor:
+        dark_color, light_color = self.FILE_COLOR_THEMES[file_index % len(self.FILE_COLOR_THEMES)]
+        return QColor(light_color if row_in_file % 2 else dark_color)
 
     def on_table_selection_changed(self):
         selected_indexes = self.table.selectionModel().selectedRows()
@@ -554,17 +649,49 @@ class MainWindow(QMainWindow):
             self.detail_text.clear()
             return
 
-        row = selected_indexes[0].row()
-        visible_logs = self.current_logs[:500]
+        selected_row = selected_indexes[0].row()
+        item = self.table.item(selected_row, 0)
 
-        if row < 0 or row >= len(visible_logs):
+        if item is None:
             self.detail_text.clear()
             return
 
-        selected_log = visible_logs[row]
+        cell_text = item.text()
+        if cell_text.startswith("=== FILE: "):
+            self.detail_text.clear()
+            return
+
+        visible_logs = self.current_logs
+
+        log_row_index = -1
+        current_table_row = -1
+
+        last_source = None
+        for idx, log in enumerate(visible_logs):
+            source_file = log.source_file if log.source_file else ""
+
+            if source_file != last_source:
+                current_table_row += 1
+                last_source = source_file
+
+            current_table_row += 1
+
+            if current_table_row == selected_row:
+                log_row_index = idx
+                break
+
+        if log_row_index == -1:
+            self.detail_text.clear()
+            return
+
+        selected_log = visible_logs[log_row_index]
         source_file = selected_log.source_file if selected_log.source_file else ""
 
         detail_lines = []
+
+        detail_lines.append("SOURCE FILE")
+        detail_lines.append(source_file if source_file else "(unknown)")
+        detail_lines.append("")
 
         detail_lines.append("NORMALIZED FIELDS")
         detail_lines.append(f"TIME    : {selected_log.timestamp}")
@@ -596,7 +723,7 @@ class MainWindow(QMainWindow):
             return
 
         metrics = QFontMetrics(self.table.font())
-        max_width = 0
+        max_width = metrics.horizontalAdvance("=== FILE: EXAMPLE ===")
 
         for log in logs:
             raw_text = log.raw if log.raw else ""

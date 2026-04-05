@@ -13,3 +13,6 @@ class AppController:
 
     def filter_logs(self, query: str):
         return self.filter_engine.filter_logs(self.all_logs, query)
+
+    def get_last_file_entry_counts(self):
+        return self.log_service.last_file_entry_counts
