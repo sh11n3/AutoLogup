@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QTableWidget, QTableWidgetItem,
     QLabel, QHeaderView, QAbstractItemView, QTextEdit,
-    QSplitter
+    QSplitter, QPushButton
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontMetrics
@@ -40,6 +40,10 @@ class MainWindow(QMainWindow):
         self.filter_input.setPlaceholderText(
             "Filter (z.B. status=401 AND ip=1.1.1.1)"
         )
+        self.filter_input.returnPressed.connect(self.apply_filter)
+
+        self.filter_button = QPushButton("Filter")
+        self.filter_button.clicked.connect(self.apply_filter)
 
         top_container = QWidget()
         top_container.setObjectName("topContainer")
@@ -49,6 +53,7 @@ class MainWindow(QMainWindow):
         top_bar.setSpacing(10)
         top_bar.addWidget(self.file_loader)
         top_bar.addWidget(self.filter_input)
+        top_bar.addWidget(self.filter_button)
         top_container.setLayout(top_bar)
 
         self.table = QTableWidget(0, 1)
@@ -280,6 +285,22 @@ class MainWindow(QMainWindow):
         )
 
         if logs:
+            self.table.selectRow(0)
+
+    def apply_filter(self):
+        query = self.filter_input.text().strip()
+        filtered_logs = self.controller.filter_logs(query)
+
+        self.current_logs = filtered_logs
+        self.populate_table(filtered_logs)
+
+        self.detail_text.clear()
+        self.detail_text.setPlainText("Wähle eine Log-Zeile aus, um den vollständigen Inhalt zu sehen.")
+        self.stats_label.setText(
+            f"Filtered: {len(filtered_logs)} / {len(self.controller.all_logs)} entries"
+        )
+
+        if filtered_logs:
             self.table.selectRow(0)
 
     def populate_table(self, logs):
