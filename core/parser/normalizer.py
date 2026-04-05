@@ -2,7 +2,7 @@ from core.models.log_entry import LogEntry
 
 
 class Normalizer:
-    USERNAME_KEYS = {"username", "user", "login", "account", "userid", "user_id"}
+    USERNAME_KEYS = {"username", "user", "login", "account", "userid", "user_id", "gender"}
     IP_KEYS = {"ip", "ip_address", "client_ip", "source_ip", "src_ip", "remote_addr"}
     STATUS_KEYS = {"status", "status_code", "code", "response_code"}
     METHOD_KEYS = {"method", "http_method", "verb"}
@@ -14,41 +14,74 @@ class Normalizer:
     def normalize(self, data: dict, raw: str, source_file: str) -> LogEntry:
         lowered = {str(k).strip().lower(): v for k, v in data.items()}
 
+        timestamp = self._to_str(self._find_best_value(lowered, self.TIMESTAMP_KEYS))
+        username = self._to_str(self._find_best_value(lowered, self.USERNAME_KEYS))
+        ip = self._to_str(self._find_best_value(lowered, self.IP_KEYS))
+        status = self._to_status_str(self._find_best_value(lowered, self.STATUS_KEYS))
+        method = self._to_str(self._find_best_value(lowered, self.METHOD_KEYS)).upper()
+        path = self._to_str(self._find_best_value(lowered, self.PATH_KEYS))
+        level = self._to_level_str(self._find_best_value(lowered, self.LEVEL_KEYS))
+        message = self._to_message(lowered, raw)
+
         entry = LogEntry(
-            timestamp=self._find_first(lowered, self.TIMESTAMP_KEYS),
-            username=self._to_str(self._find_first(lowered, self.USERNAME_KEYS)),
-            ip=self._to_str(self._find_first(lowered, self.IP_KEYS)),
-            status=self._to_int(self._find_first(lowered, self.STATUS_KEYS)),
-            method=self._to_str(self._find_first(lowered, self.METHOD_KEYS)),
-            path=self._to_str(self._find_first(lowered, self.PATH_KEYS)),
-            level=self._to_str(self._find_first(lowered, self.LEVEL_KEYS)),
-            message=self._to_str(self._find_first(lowered, self.MESSAGE_KEYS)),
-            raw=raw,
-            source_file=source_file,
+            timestamp=timestamp,
+            username=username,
+            ip=ip,
+            status=status,
+            method=method,
+            path=path,
+            level=level,
+            message=message,
+            raw=raw or "",
+            source_file=source_file or "",
             extra=self._build_extra(lowered),
         )
 
         return entry
 
-    def _find_first(self, data: dict, keys: set[str]):
+    def _find_best_value(self, data: dict, keys: set[str]):
+        # 1. exakter Key
         for key in keys:
             if key in data:
                 return data[key]
+
+        # 2. suffix match für verschachtelte Keys wie event.ip / log.user
+        for data_key, value in data.items():
+            for key in keys:
+                if data_key.endswith(f".{key}") or data_key.endswith(f"@{key}") or data_key == key:
+                    return value
+
         return None
 
-    def _to_str(self, value):
+    def _to_str(self, value) -> str:
         if value is None:
-            return None
-        return str(value)
+            return ""
+        return str(value).strip()
 
-    def _to_int(self, value):
+    def _to_status_str(self, value) -> str:
         if value is None:
-            return None
+            return ""
 
         try:
-            return int(value)
+            return str(int(value))
         except (ValueError, TypeError):
-            return None
+            return str(value).strip()
+
+    def _to_level_str(self, value) -> str:
+        if value is None:
+            return ""
+
+        level = str(value).strip().upper()
+        if level == "WARNING":
+            return "WARN"
+        return level
+
+    def _to_message(self, data: dict, raw: str) -> str:
+        message_value = self._find_best_value(data, self.MESSAGE_KEYS)
+        if message_value is not None:
+            return str(message_value).strip()
+
+        return raw or ""
 
     def _build_extra(self, data: dict) -> dict:
         known_keys = (
@@ -65,7 +98,18 @@ class Normalizer:
         extra = {}
 
         for key, value in data.items():
-            if key not in known_keys:
-                extra[key] = value
+            if self._is_known_key(key, known_keys):
+                continue
+            extra[key] = value
 
         return extra
+
+    def _is_known_key(self, key: str, known_keys: set[str]) -> bool:
+        if key in known_keys:
+            return True
+
+        for known_key in known_keys:
+            if key.endswith(f".{known_key}") or key.endswith(f"@{known_key}"):
+                return True
+
+        return False

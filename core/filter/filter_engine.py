@@ -46,6 +46,7 @@ class FilterEngine:
 
     def _match_condition(self, log: LogEntry, condition: dict) -> bool:
         field = condition["field"]
+        operator = condition["operator"]
         expected_value = condition["value"]
 
         actual_value = self._get_field_value(log, field)
@@ -53,18 +54,25 @@ class FilterEngine:
         if actual_value is None:
             return False
 
-        # numerische Felder exakt vergleichen
-        if isinstance(actual_value, int):
-            try:
-                return actual_value == int(expected_value)
-            except ValueError:
-                return False
+        # Exakter Vergleich
+        if operator == "=":
+            if isinstance(actual_value, int):
+                try:
+                    return actual_value == int(expected_value)
+                except ValueError:
+                    return False
 
-        # Strings: exakter Vergleich, aber case-insensitive
-        actual_str = str(actual_value).strip().lower()
-        expected_str = str(expected_value).strip().lower()
+            actual_str = str(actual_value).strip().lower()
+            expected_str = str(expected_value).strip().lower()
+            return actual_str == expected_str
 
-        return actual_str == expected_str
+        # Contains / substring
+        if operator == "~":
+            actual_str = str(actual_value).strip().lower()
+            expected_str = str(expected_value).strip().lower()
+            return expected_str in actual_str
+
+        return False
 
     def _get_field_value(self, log: LogEntry, field: str):
         field = field.strip().lower()

@@ -5,14 +5,15 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QTableWidget, QTableWidgetItem,
     QLabel, QHeaderView, QAbstractItemView, QTextEdit,
-    QSplitter, QPushButton
+    QSplitter, QPushButton, QComboBox, QToolButton
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QFontMetrics
+from PySide6.QtGui import QFont, QFontMetrics, QKeySequence, QShortcut
 
 from core.controller.app_controller import AppController
 from core.services.log_service import LogService
 from ui.components.file_loader import FileLoaderButton
+from ui.components.highlight_delegate import HighlightDelegate
 
 
 class MainWindow(QMainWindow):
@@ -24,9 +25,12 @@ class MainWindow(QMainWindow):
 
         self.controller = AppController(LogService())
         self.current_logs = []
+        self.search_match_rows = []
+        self.current_search_match_index = -1
 
         self.setup_ui()
         self.apply_styles()
+        self.setup_shortcuts()
 
     def setup_ui(self):
         central = QWidget()
@@ -38,12 +42,15 @@ class MainWindow(QMainWindow):
 
         self.filter_input = QLineEdit()
         self.filter_input.setPlaceholderText(
-            "Filter (z.B. status=401 AND ip=1.1.1.1)"
+            "Filter (z.B. status=401 AND ip=1.1.1.1 | message~failed)"
         )
         self.filter_input.returnPressed.connect(self.apply_filter)
 
         self.filter_button = QPushButton("Filter")
         self.filter_button.clicked.connect(self.apply_filter)
+
+        self.clear_filter_button = QPushButton("Clear")
+        self.clear_filter_button.clicked.connect(self.clear_filter)
 
         top_container = QWidget()
         top_container.setObjectName("topContainer")
@@ -54,11 +61,52 @@ class MainWindow(QMainWindow):
         top_bar.addWidget(self.file_loader)
         top_bar.addWidget(self.filter_input)
         top_bar.addWidget(self.filter_button)
+        top_bar.addWidget(self.clear_filter_button)
         top_container.setLayout(top_bar)
+
+        self.search_container = QWidget()
+        self.search_container.setObjectName("searchContainer")
+        self.search_container.setVisible(False)
+
+        search_layout = QHBoxLayout()
+        search_layout.setContentsMargins(12, 10, 12, 10)
+        search_layout.setSpacing(10)
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search in visible logs... (Ctrl+F)")
+        self.search_input.textChanged.connect(self.on_search_text_changed)
+
+        self.search_mode_combo = QComboBox()
+        self.search_mode_combo.addItems(["Contains", "Exact"])
+        self.search_mode_combo.currentIndexChanged.connect(self.on_search_mode_changed)
+
+        self.search_prev_button = QToolButton()
+        self.search_prev_button.setText("↑")
+        self.search_prev_button.clicked.connect(self.goto_previous_search_match)
+
+        self.search_next_button = QToolButton()
+        self.search_next_button.setText("↓")
+        self.search_next_button.clicked.connect(self.goto_next_search_match)
+
+        self.search_result_label = QLabel("0")
+        self.search_result_label.setObjectName("searchResultLabel")
+
+        self.search_close_button = QToolButton()
+        self.search_close_button.setText("✕")
+        self.search_close_button.clicked.connect(self.close_search_bar)
+
+        search_layout.addWidget(self.search_input)
+        search_layout.addWidget(self.search_mode_combo)
+        search_layout.addWidget(self.search_prev_button)
+        search_layout.addWidget(self.search_next_button)
+        search_layout.addWidget(self.search_result_label)
+        search_layout.addWidget(self.search_close_button)
+
+        self.search_container.setLayout(search_layout)
 
         self.table = QTableWidget(0, 1)
         self.table.setColumnCount(1)
-        self.table.setHorizontalHeaderLabels(["Log"])
+        self.table.setHorizontalHeaderLabels(["Raw Log"])
 
         self.table.setTextElideMode(Qt.ElideNone)
         self.table.setWordWrap(False)
@@ -80,6 +128,9 @@ class MainWindow(QMainWindow):
         table_font = QFont("Consolas")
         table_font.setPointSize(10)
         self.table.setFont(table_font)
+
+        self.highlight_delegate = HighlightDelegate(self.table)
+        self.table.setItemDelegateForColumn(0, self.highlight_delegate)
 
         self.table.itemSelectionChanged.connect(self.on_table_selection_changed)
 
@@ -115,11 +166,119 @@ class MainWindow(QMainWindow):
         self.stats_label = QLabel("No data loaded")
 
         main_layout.addWidget(top_container)
+        main_layout.addWidget(self.search_container)
         main_layout.addWidget(self.splitter)
         main_layout.addWidget(self.stats_label)
 
         central.setLayout(main_layout)
         self.setCentralWidget(central)
+
+    def setup_shortcuts(self):
+        self.find_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
+        self.find_shortcut.activated.connect(self.open_search_bar)
+
+        self.escape_shortcut = QShortcut(QKeySequence("Escape"), self)
+        self.escape_shortcut.activated.connect(self.on_escape_pressed)
+
+    def open_search_bar(self):
+        self.search_container.setVisible(True)
+        self.search_input.setFocus()
+        self.search_input.selectAll()
+
+    def close_search_bar(self):
+        self.search_input.clear()
+        self.search_container.setVisible(False)
+        self.highlight_delegate.set_search("", "contains")
+        self.search_match_rows = []
+        self.current_search_match_index = -1
+        self.search_result_label.setText("0")
+        self.table.viewport().update()
+        self.table.setFocus()
+
+    def on_escape_pressed(self):
+        if self.search_container.isVisible():
+            self.close_search_bar()
+
+    def on_search_text_changed(self, text):
+        self.highlight_delegate.set_search(text, self._current_search_mode())
+        self._rebuild_search_matches()
+        self.table.viewport().update()
+
+    def on_search_mode_changed(self, _index):
+        self.highlight_delegate.set_search(self.search_input.text(), self._current_search_mode())
+        self._rebuild_search_matches()
+        self.table.viewport().update()
+
+    def _current_search_mode(self) -> str:
+        return "exact" if self.search_mode_combo.currentText() == "Exact" else "contains"
+
+    def _rebuild_search_matches(self):
+        self.search_match_rows = []
+        self.current_search_match_index = -1
+
+        search_text = self.search_input.text().strip()
+        if not search_text:
+            self.search_result_label.setText("0")
+            return
+
+        visible_logs = self.current_logs[:500]
+
+        for row, log in enumerate(visible_logs):
+            raw_text = log.raw if log.raw else ""
+            if self.highlight_delegate.row_has_match(raw_text):
+                self.search_match_rows.append(row)
+
+        if self.search_match_rows:
+            self.current_search_match_index = 0
+            self._select_search_match(self.current_search_match_index)
+
+        self._update_search_result_label()
+
+    def _update_search_result_label(self):
+        if not self.search_match_rows:
+            self.search_result_label.setText("0")
+            return
+
+        self.search_result_label.setText(
+            f"{self.current_search_match_index + 1}/{len(self.search_match_rows)}"
+        )
+
+    def goto_next_search_match(self):
+        if not self.search_match_rows:
+            return
+
+        self.current_search_match_index += 1
+        if self.current_search_match_index >= len(self.search_match_rows):
+            self.current_search_match_index = 0
+
+        self._select_search_match(self.current_search_match_index)
+        self._update_search_result_label()
+
+    def goto_previous_search_match(self):
+        if not self.search_match_rows:
+            return
+
+        self.current_search_match_index -= 1
+        if self.current_search_match_index < 0:
+            self.current_search_match_index = len(self.search_match_rows) - 1
+
+        self._select_search_match(self.current_search_match_index)
+        self._update_search_result_label()
+
+    def _select_search_match(self, match_index: int):
+        if match_index < 0 or match_index >= len(self.search_match_rows):
+            return
+
+        row = self.search_match_rows[match_index]
+        h_scroll = self.table.horizontalScrollBar().value()
+
+        self.table.selectRow(row)
+        self.table.scrollToItem(
+            self.table.item(row, 0),
+            QAbstractItemView.PositionAtCenter
+        )
+
+        self.table.horizontalScrollBar().setValue(h_scroll)
 
     def apply_styles(self):
         self.setStyleSheet("""
@@ -137,6 +296,12 @@ class MainWindow(QMainWindow):
                 border-radius: 12px;
             }
 
+            QWidget#searchContainer {
+                background-color: #0f172a;
+                border: 1px solid #2563EB;
+                border-radius: 12px;
+            }
+
             QWidget#detailContainer {
                 background-color: #0f172a;
                 border: 1px solid #374151;
@@ -147,6 +312,12 @@ class MainWindow(QMainWindow):
                 color: #93C5FD;
                 font-size: 14px;
                 font-weight: bold;
+            }
+
+            QLabel#searchResultLabel {
+                color: #93C5FD;
+                font-weight: bold;
+                min-width: 55px;
             }
 
             QPushButton {
@@ -169,6 +340,22 @@ class MainWindow(QMainWindow):
                 border: 1px solid #1D4ED8;
             }
 
+            QToolButton {
+                background-color: #1f2937;
+                color: #E5E7EB;
+                border: 1px solid #374151;
+                padding: 6px 10px;
+                border-radius: 8px;
+                font-weight: bold;
+                min-width: 26px;
+            }
+
+            QToolButton:hover {
+                background-color: #2563EB;
+                color: white;
+                border: 1px solid #3B82F6;
+            }
+
             QLineEdit {
                 background-color: #1f2937;
                 color: #E5E7EB;
@@ -180,6 +367,26 @@ class MainWindow(QMainWindow):
             QLineEdit:focus {
                 border: 1px solid #2563EB;
                 background-color: #111827;
+            }
+
+            QComboBox {
+                background-color: #1f2937;
+                color: #E5E7EB;
+                padding: 8px 12px;
+                border-radius: 10px;
+                border: 1px solid #374151;
+                min-width: 110px;
+            }
+
+            QComboBox:hover {
+                border: 1px solid #3B82F6;
+            }
+
+            QAbstractItemView {
+                background-color: #1f2937;
+                color: #E5E7EB;
+                selection-background-color: #2563EB;
+                selection-color: white;
             }
 
             QTableWidget {
@@ -284,6 +491,8 @@ class MainWindow(QMainWindow):
             f"Loaded {len(file_paths)} files, {len(logs)} entries"
         )
 
+        self._rebuild_search_matches()
+
         if logs:
             self.table.selectRow(0)
 
@@ -300,7 +509,25 @@ class MainWindow(QMainWindow):
             f"Filtered: {len(filtered_logs)} / {len(self.controller.all_logs)} entries"
         )
 
+        self._rebuild_search_matches()
+
         if filtered_logs:
+            self.table.selectRow(0)
+
+    def clear_filter(self):
+        self.filter_input.clear()
+        self.current_logs = self.controller.all_logs
+        self.populate_table(self.current_logs)
+
+        self.detail_text.clear()
+        self.detail_text.setPlainText("Wähle eine Log-Zeile aus, um den vollständigen Inhalt zu sehen.")
+        self.stats_label.setText(
+            f"Loaded {len(self.controller.all_logs)} entries"
+        )
+
+        self._rebuild_search_matches()
+
+        if self.current_logs:
             self.table.selectRow(0)
 
     def populate_table(self, logs):
@@ -318,6 +545,7 @@ class MainWindow(QMainWindow):
 
         self.table.resizeRowsToContents()
         self._update_log_column_width(visible_logs)
+        self.table.viewport().update()
 
     def on_table_selection_changed(self):
         selected_indexes = self.table.selectionModel().selectedRows()
@@ -334,11 +562,33 @@ class MainWindow(QMainWindow):
             return
 
         selected_log = visible_logs[row]
-        full_text = selected_log.raw if selected_log.raw else ""
         source_file = selected_log.source_file if selected_log.source_file else ""
 
-        formatted_text = self._format_detail_text(full_text, source_file)
-        self.detail_text.setPlainText(formatted_text)
+        detail_lines = []
+
+        detail_lines.append("NORMALIZED FIELDS")
+        detail_lines.append(f"TIME    : {selected_log.timestamp}")
+        detail_lines.append(f"USER    : {selected_log.username}")
+        detail_lines.append(f"IP      : {selected_log.ip}")
+        detail_lines.append(f"STATUS  : {selected_log.status}")
+        detail_lines.append(f"METHOD  : {selected_log.method}")
+        detail_lines.append(f"PATH    : {selected_log.path}")
+        detail_lines.append(f"LEVEL   : {selected_log.level}")
+        detail_lines.append(f"MESSAGE : {selected_log.message}")
+        detail_lines.append("")
+
+        detail_lines.append("EXTRA FIELDS")
+        if selected_log.extra:
+            for key in sorted(selected_log.extra.keys()):
+                detail_lines.append(f"{key} : {selected_log.extra[key]}")
+        else:
+            detail_lines.append("(none)")
+        detail_lines.append("")
+
+        detail_lines.append("RAW")
+        detail_lines.append(self._format_detail_text(selected_log.raw, source_file))
+
+        self.detail_text.setPlainText("\n".join(detail_lines))
 
     def _update_log_column_width(self, logs):
         if not logs:

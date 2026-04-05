@@ -33,10 +33,16 @@ class QueryParser:
         return conditions, operators
 
     def _parse_condition(self, text: str) -> dict | None:
-        if "=" not in text:
-            return None
+        text = text.strip()
 
-        field, value = text.split("=", 1)
+        if "~" in text:
+            field, value = text.split("~", 1)
+            operator = "~"
+        elif "=" in text:
+            field, value = text.split("=", 1)
+            operator = "="
+        else:
+            return None
 
         field = field.strip().lower()
         value = value.strip()
@@ -46,5 +52,6 @@ class QueryParser:
 
         return {
             "field": field,
+            "operator": operator,
             "value": value,
         }
