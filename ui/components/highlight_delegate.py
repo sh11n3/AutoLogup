@@ -4,13 +4,16 @@ from PySide6.QtCore import Qt, QRect
 
 
 class HighlightDelegate(QStyledItemDelegate):
+    BG_ROLE = Qt.UserRole + 1
+    STRIPE_ROLE = Qt.UserRole + 2
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.search_text = ""
         self.mode = "contains"
 
     def set_search(self, text: str, mode: str):
-        self.search_text = text.lower()
+        self.search_text = (text or "").lower()
         self.mode = mode
 
     def row_has_match(self, text: str) -> bool:
@@ -21,35 +24,34 @@ class HighlightDelegate(QStyledItemDelegate):
 
         if self.mode == "exact":
             return self.search_text in text_lower.split()
-        else:
-            return self.search_text in text_lower
+        return self.search_text in text_lower
 
     def paint(self, painter: QPainter, option, index):
         painter.save()
 
-        text = index.data()
-        if not text:
-            text = ""
+        text = index.data(Qt.DisplayRole) or ""
 
-        # 👉 Hintergrund (Selection korrekt)
+        # Hintergrundfarbe aus Model holen
+        bg_hex = index.data(self.BG_ROLE)
+        stripe_hex = index.data(self.STRIPE_ROLE)
+
         if option.state & QStyle.State_Selected:
             painter.fillRect(option.rect, option.palette.highlight())
             text_color = option.palette.highlightedText().color()
         else:
-            painter.fillRect(option.rect, option.palette.base())
+            bg_color = QColor(bg_hex) if bg_hex else QColor("#111827")
+            painter.fillRect(option.rect, bg_color)
             text_color = option.palette.text().color()
 
-        # 👉 FILE COLOR STRIPE
-        file_color = index.data(Qt.UserRole)
-        if file_color:
-            stripe_rect = QRect(option.rect.left(), option.rect.top(), 6, option.rect.height())
-            painter.fillRect(stripe_rect, QColor(file_color))
+        # farbiger Datei-Streifen links
+        if stripe_hex:
+            stripe_rect = QRect(option.rect.left(), option.rect.top(), 8, option.rect.height())
+            painter.fillRect(stripe_rect, QColor(stripe_hex))
 
-        # 👉 Text Rendering vorbereiten
         painter.setPen(text_color)
 
-        x = option.rect.left() + 10
-        y = option.rect.top() + option.fontMetrics.ascent() + 2
+        x = option.rect.left() + 14
+        y = option.rect.top() + option.fontMetrics.ascent() + 4
 
         if not self.search_text:
             painter.drawText(x, y, text)
@@ -58,48 +60,53 @@ class HighlightDelegate(QStyledItemDelegate):
 
         text_lower = text.lower()
         search = self.search_text
-
         i = 0
 
         while i < len(text):
-            match_index = -1
-
             if self.mode == "exact":
-                words = text_lower.split()
-                if search in words:
-                    match_index = text_lower.find(search, i)
+                idx = self._find_exact(text_lower, search, i)
             else:
-                match_index = text_lower.find(search, i)
+                idx = text_lower.find(search, i)
 
-            if match_index == -1:
-                # Rest normal zeichnen
+            if idx == -1:
                 painter.drawText(x, y, text[i:])
                 break
 
-            # 👉 Teil vor Match
-            before = text[i:match_index]
+            before = text[i:idx]
             painter.drawText(x, y, before)
             x += option.fontMetrics.horizontalAdvance(before)
 
-            # 👉 Highlight Teil
-            match_text = text[match_index:match_index + len(search)]
-
+            match_text = text[idx:idx + len(search)]
             rect_width = option.fontMetrics.horizontalAdvance(match_text)
 
             highlight_rect = QRect(
                 x,
-                option.rect.top(),
+                option.rect.top() + 2,
                 rect_width,
-                option.rect.height()
+                option.rect.height() - 4
             )
 
             painter.fillRect(highlight_rect, QColor("#facc15"))
             painter.setPen(QColor("#000000"))
             painter.drawText(x, y, match_text)
-
             painter.setPen(text_color)
 
             x += rect_width
-            i = match_index + len(search)
+            i = idx + len(search)
 
         painter.restore()
+
+    def _find_exact(self, text_lower: str, search: str, start: int) -> int:
+        idx = text_lower.find(search, start)
+
+        while idx != -1:
+            left_ok = idx == 0 or not text_lower[idx - 1].isalnum()
+            right_pos = idx + len(search)
+            right_ok = right_pos >= len(text_lower) or not text_lower[right_pos].isalnum()
+
+            if left_ok and right_ok:
+                return idx
+
+            idx = text_lower.find(search, idx + 1)
+
+        return -1

@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QSplitter, QPushButton, QComboBox, QToolButton
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QFontMetrics, QKeySequence, QShortcut, QColor, QBrush
+from PySide6.QtGui import QFont, QFontMetrics, QKeySequence, QShortcut
 
 from core.controller.app_controller import AppController
 from core.services.log_service import LogService
@@ -18,14 +18,14 @@ from ui.components.highlight_delegate import HighlightDelegate
 
 
 class MainWindow(QMainWindow):
+    # (dark, light, stripe)
     FILE_COLOR_THEMES = [
-        ("#0b1f3a", "#12305a"),
-        ("#0d2a1a", "#16402a"),
-        ("#2a0d3a", "#40145a"),
-        ("#3a1f0b", "#5a3212"),
-        ("#3a0b0b", "#5a1212"),
-        ("#0b3a3a", "#125a5a"),
-        ("#2f2f2f", "#444444"),
+        ("#0b1830", "#132445", "#3b82f6"),  # blau
+        ("#0d2416", "#153520", "#22c55e"),  # grün
+        ("#221033", "#34184d", "#a855f7"),  # violett
+        ("#301a0b", "#452613", "#f97316"),  # orange
+        ("#2d0f14", "#45161f", "#ef4444"),  # rot
+        ("#0d2628", "#15383b", "#14b8a6"),  # cyan
     ]
 
     def __init__(self):
@@ -562,7 +562,6 @@ class MainWindow(QMainWindow):
 
         file_index_map = self._build_file_index_map(visible_logs)
         file_row_counter = {}
-
         last_source = None
 
         for log in visible_logs:
@@ -575,8 +574,8 @@ class MainWindow(QMainWindow):
                 file_name = Path(source_file).name if source_file else "(unknown file)"
                 header_item = QTableWidgetItem(f"=== FILE: {file_name} ===")
                 header_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                header_item.setBackground(QBrush(QColor("#0b1220")))
-                header_item.setForeground(QBrush(QColor("#93C5FD")))
+                header_item.setData(HighlightDelegate.BG_ROLE, "#1e293b")
+                header_item.setData(HighlightDelegate.STRIPE_ROLE, "#93c5fd")
                 self.table.setItem(header_row, 0, header_item)
 
                 last_source = source_file
@@ -588,31 +587,16 @@ class MainWindow(QMainWindow):
             item = QTableWidgetItem(raw_text)
             item.setToolTip(raw_text)
 
-            # 👉 file_index korrekt setzen
-            file_index = file_index_map.get(source_file, 0)
-
-            # 👉 Farbe bestimmen
-            color_palette = [
-                "#3B82F6",  # blau
-                "#22C55E",  # grün
-                "#A855F7",  # violett
-                "#F97316",  # orange
-                "#EF4444",  # rot
-                "#14B8A6",  # cyan
-            ]
-
-            file_color = color_palette[file_index % len(color_palette)]
-
-            # 👉 an Delegate übergeben
-            item.setData(Qt.UserRole, file_color)
-
             file_index = file_index_map.get(source_file, 0)
             row_in_file = file_row_counter.get(source_file, 0)
 
-            bg_color = self._get_row_background_color(file_index, row_in_file)
+            dark_bg, light_bg, stripe = self.FILE_COLOR_THEMES[file_index % len(self.FILE_COLOR_THEMES)]
+            row_bg = light_bg if row_in_file % 2 else dark_bg
+
+            item.setData(HighlightDelegate.BG_ROLE, row_bg)
+            item.setData(HighlightDelegate.STRIPE_ROLE, stripe)
 
             self.table.setItem(row, 0, item)
-
             file_row_counter[source_file] = row_in_file + 1
 
         self.table.resizeRowsToContents()
@@ -638,10 +622,6 @@ class MainWindow(QMainWindow):
 
         return file_index_map
 
-    def _get_row_background_color(self, file_index: int, row_in_file: int) -> QColor:
-        dark_color, light_color = self.FILE_COLOR_THEMES[file_index % len(self.FILE_COLOR_THEMES)]
-        return QColor(light_color if row_in_file % 2 else dark_color)
-
     def on_table_selection_changed(self):
         selected_indexes = self.table.selectionModel().selectedRows()
 
@@ -662,11 +642,10 @@ class MainWindow(QMainWindow):
             return
 
         visible_logs = self.current_logs
-
         log_row_index = -1
         current_table_row = -1
-
         last_source = None
+
         for idx, log in enumerate(visible_logs):
             source_file = log.source_file if log.source_file else ""
 
@@ -687,33 +666,34 @@ class MainWindow(QMainWindow):
         selected_log = visible_logs[log_row_index]
         source_file = selected_log.source_file if selected_log.source_file else ""
 
-        detail_lines = []
+        detail_lines = [
+            "SOURCE FILE",
+            source_file if source_file else "(unknown)",
+            "",
+            "NORMALIZED FIELDS",
+            f"TIME    : {selected_log.timestamp}",
+            f"USER    : {selected_log.username}",
+            f"IP      : {selected_log.ip}",
+            f"STATUS  : {selected_log.status}",
+            f"METHOD  : {selected_log.method}",
+            f"PATH    : {selected_log.path}",
+            f"LEVEL   : {selected_log.level}",
+            f"MESSAGE : {selected_log.message}",
+            "",
+            "EXTRA FIELDS",
+        ]
 
-        detail_lines.append("SOURCE FILE")
-        detail_lines.append(source_file if source_file else "(unknown)")
-        detail_lines.append("")
-
-        detail_lines.append("NORMALIZED FIELDS")
-        detail_lines.append(f"TIME    : {selected_log.timestamp}")
-        detail_lines.append(f"USER    : {selected_log.username}")
-        detail_lines.append(f"IP      : {selected_log.ip}")
-        detail_lines.append(f"STATUS  : {selected_log.status}")
-        detail_lines.append(f"METHOD  : {selected_log.method}")
-        detail_lines.append(f"PATH    : {selected_log.path}")
-        detail_lines.append(f"LEVEL   : {selected_log.level}")
-        detail_lines.append(f"MESSAGE : {selected_log.message}")
-        detail_lines.append("")
-
-        detail_lines.append("EXTRA FIELDS")
         if selected_log.extra:
             for key in sorted(selected_log.extra.keys()):
                 detail_lines.append(f"{key} : {selected_log.extra[key]}")
         else:
             detail_lines.append("(none)")
-        detail_lines.append("")
 
-        detail_lines.append("RAW")
-        detail_lines.append(self._format_detail_text(selected_log.raw, source_file))
+        detail_lines.extend([
+            "",
+            "RAW",
+            self._format_detail_text(selected_log.raw, source_file),
+        ])
 
         self.detail_text.setPlainText("\n".join(detail_lines))
 
@@ -728,7 +708,6 @@ class MainWindow(QMainWindow):
         for log in logs:
             raw_text = log.raw if log.raw else ""
             text_width = metrics.horizontalAdvance(raw_text)
-
             if text_width > max_width:
                 max_width = text_width
 
@@ -761,11 +740,7 @@ class MainWindow(QMainWindow):
             parsed = minidom.parseString(raw_text.encode("utf-8"))
             pretty = parsed.toprettyxml(indent="    ")
 
-            lines = []
-            for line in pretty.splitlines():
-                if line.strip():
-                    lines.append(line)
-
+            lines = [line for line in pretty.splitlines() if line.strip()]
             return "\n".join(lines)
         except Exception:
             return raw_text
