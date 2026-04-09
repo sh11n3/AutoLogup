@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from xml.dom import minidom
 
+from ui.components.group_window import GroupWindow
+
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLineEdit, QTableWidget, QTableWidgetItem,
@@ -71,8 +73,11 @@ class MainWindow(QMainWindow):
         top_bar.setSpacing(10)
         top_bar.addWidget(self.file_loader)
         top_bar.addWidget(self.filter_input)
+        self.group_button = QPushButton("Group")
+        self.group_button.clicked.connect(self.open_group_window)
         top_bar.addWidget(self.filter_button)
         top_bar.addWidget(self.clear_filter_button)
+        top_bar.addWidget(self.group_button)
         top_container.setLayout(top_bar)
 
         self.search_container = QWidget()
@@ -744,3 +749,10 @@ class MainWindow(QMainWindow):
             return "\n".join(lines)
         except Exception:
             return raw_text
+
+    def open_group_window(self):
+        if not self.current_logs:
+            return
+
+        self.group_window = GroupWindow(self.current_logs)
+        self.group_window.show()
