@@ -754,5 +754,34 @@ class MainWindow(QMainWindow):
         if not self.current_logs:
             return
 
-        self.group_window = GroupWindow(self.current_logs)
+        self.group_window = GroupWindow(
+            self.current_logs,
+            self.apply_group_filter
+        )
         self.group_window.show()
+
+    def apply_group_filter(self, field, value):
+        filtered = []
+
+        for log in self.controller.all_logs:
+            val = None
+
+            # bekannte Felder
+            if hasattr(log, field):
+                val = getattr(log, field)
+
+            # dynamische Felder
+            elif log.extra and field in log.extra:
+                val = log.extra[field]
+
+            val = str(val) if val else "(empty)"
+
+            if val == value:
+                filtered.append(log)
+
+        self.current_logs = filtered
+        self.populate_table(filtered)
+
+        self.stats_label.setText(
+            f"Grouped by {field} = {value} → {len(filtered)} entries"
+        )

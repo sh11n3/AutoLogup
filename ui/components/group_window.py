@@ -9,9 +9,10 @@ from PySide6.QtCore import Qt
 
 
 class GroupWindow(QWidget):
-    def __init__(self, logs):
+    def __init__(self, logs, on_group_selected):
         super().__init__()
 
+        self.on_group_selected = on_group_selected
         self.setWindowTitle("Grouping")
         self.resize(400, 600)
 
@@ -49,6 +50,7 @@ class GroupWindow(QWidget):
         layout.addWidget(self.list_widget)
 
         self.setLayout(layout)
+        self.list_widget.itemClicked.connect(self.on_item_clicked)
 
         self.load_fields()
 
@@ -100,3 +102,15 @@ class GroupWindow(QWidget):
             return log.extra[field]
 
         return "(empty)"
+
+    def on_item_clicked(self, item):
+        text = item.text()
+
+        # Beispiel: "Male (520)"
+        value = text.rsplit("(", 1)[0].strip()
+        field = self.combo.currentText()
+
+        if self.on_group_selected:
+            self.on_group_selected(field, value)
+
+        self.close()
