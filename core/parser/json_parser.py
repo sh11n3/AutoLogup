@@ -20,12 +20,14 @@ class JSONParser(BaseParser):
         if not content:
             return []
 
-        # 1. Erst versuchen: komplette Datei als JSON parsen
+        # First assume the file is one valid JSON document. That covers
+        # arrays of objects and single JSON objects.
         parsed_entries = self._parse_full_json(content, file_path)
         if parsed_entries is not None:
             return parsed_entries
 
-        # 2. Fallback: JSON Lines
+        # If that fails, treat the file as JSON Lines where each line may hold
+        # one independent JSON object.
         return self._parse_json_lines(lines, file_path)
 
     def _parse_full_json(self, content: str, file_path: str) -> list[LogEntry] | None:
@@ -37,6 +39,7 @@ class JSONParser(BaseParser):
         if isinstance(obj, list):
             entries: list[LogEntry] = []
 
+            # A top-level JSON array becomes one log entry per object item.
             for item in obj:
                 if not isinstance(item, dict):
                     continue
@@ -53,6 +56,8 @@ class JSONParser(BaseParser):
             return entries
 
         if isinstance(obj, dict):
+            # A single JSON object still becomes a list with one entry so the
+            # parser interface stays the same for all input shapes.
             raw = json.dumps(obj, ensure_ascii=False)
             flat_obj = self._flatten_dict(obj)
             entry = self.normalizer.normalize(
@@ -91,6 +96,8 @@ class JSONParser(BaseParser):
         return entries
 
     def _flatten_dict(self, data: dict, parent_key: str = "", sep: str = ".") -> dict:
+        # Flatten nested dictionaries into dotted keys so deep values remain
+        # accessible to filters, grouping, and the detail view.
         items = {}
 
         for key, value in data.items():

@@ -30,6 +30,8 @@ from ui.components.search_manager import SearchManager
 
 
 class MainWindow(QMainWindow):
+    # Default text shown in the lower detail pane until the user selects
+    # a real log row from the table.
     DEFAULT_DETAIL_TEXT = "Waehle eine Log-Zeile aus, um den vollstaendigen Inhalt zu sehen."
 
     def __init__(self):
@@ -41,6 +43,9 @@ class MainWindow(QMainWindow):
         self.controller = AppController(LogService())
         self.current_logs = []
 
+        # Build the widgets first, then create the helper objects that operate
+        # on those widgets. This keeps construction order explicit and avoids
+        # helpers trying to access UI elements before they exist.
         self.setup_ui()
         self.table_manager = LogTableManager(self.table)
         self.detail_formatter = LogDetailFormatter()
@@ -58,6 +63,11 @@ class MainWindow(QMainWindow):
         self.setup_shortcuts()
 
     def setup_ui(self):
+        # The main layout is organized into four parts:
+        # 1. a top toolbar for loading and filtering
+        # 2. an optional inline search bar
+        # 3. the log table
+        # 4. the lower detail view
         central = QWidget()
         main_layout = QVBoxLayout()
         main_layout.setSpacing(15)
@@ -128,6 +138,8 @@ class MainWindow(QMainWindow):
         self.search_container.setLayout(search_layout)
 
         self.table = QTableWidget(0, 1)
+        # The table uses one visible column for the raw log text. Row coloring,
+        # source stripes, and match highlights are handled by helper classes.
         self.table.setColumnCount(1)
         self.table.setHorizontalHeaderLabels(["Raw Log"])
         self.table.setTextElideMode(Qt.ElideNone)
@@ -177,6 +189,8 @@ class MainWindow(QMainWindow):
         detail_container.setLayout(detail_layout)
 
         self.splitter = QSplitter(Qt.Vertical)
+        # A vertical splitter lets the user decide how much space the table and
+        # the detail panel should get without opening separate windows.
         self.splitter.addWidget(self.table)
         self.splitter.addWidget(detail_container)
         self.splitter.setStretchFactor(0, 3)
@@ -195,6 +209,8 @@ class MainWindow(QMainWindow):
         self._reset_detail_panel()
 
     def _connect_search_signals(self):
+        # Wire the search widgets to SearchManager so the window only owns the
+        # widgets themselves, not the search state machine.
         self.search_input.textChanged.connect(self.search_manager.on_search_text_changed)
         self.search_mode_combo.currentIndexChanged.connect(self.search_manager.on_search_mode_changed)
         self.search_prev_button.clicked.connect(self.search_manager.goto_previous_search_match)
@@ -202,6 +218,8 @@ class MainWindow(QMainWindow):
         self.search_close_button.clicked.connect(self.search_manager.close_search_bar)
 
     def setup_shortcuts(self):
+        # Keep the basic desktop shortcuts close to where they are registered,
+        # so they are easy to find and change later.
         self.find_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
         self.find_shortcut.activated.connect(self.search_manager.open_search_bar)
 
@@ -209,6 +227,8 @@ class MainWindow(QMainWindow):
         self.escape_shortcut.activated.connect(self.search_manager.on_escape_pressed)
 
     def apply_styles(self):
+        # Keep the visual styling in one place so widget construction can stay
+        # focused on structure and behavior rather than presentation details.
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #111827;
@@ -408,6 +428,8 @@ class MainWindow(QMainWindow):
         """)
 
     def on_files_loaded(self, file_paths):
+        # Loading files creates a fresh working dataset and refreshes the table,
+        # detail panel, search state, and status text in one go.
         logs = self.controller.load_files(file_paths)
 
         file_counts = self.controller.get_last_file_entry_counts()
@@ -425,6 +447,8 @@ class MainWindow(QMainWindow):
         self._show_logs(logs, stats_text)
 
     def apply_filter(self):
+        # Apply the current query to the full loaded dataset through the controller,
+        # then show only the resulting subset in the table.
         query = self.filter_input.text().strip()
         filtered_logs = self.controller.filter_logs(query)
         stats_text = (
@@ -433,11 +457,15 @@ class MainWindow(QMainWindow):
         self._show_logs(filtered_logs, stats_text)
 
     def clear_filter(self):
+        # Restore the full loaded dataset without touching the filesystem again.
+        # This is intentionally just a view reset, not a reload.
         self.filter_input.clear()
         stats_text = f"Loaded {len(self.controller.all_logs)} entries"
         self._show_logs(self.controller.all_logs, stats_text)
 
     def _show_logs(self, logs, stats_text: str):
+        # Centralize every dataset-to-UI transition here so loading, filtering,
+        # clearing, and grouping all update the window in exactly the same way.
         self.current_logs = logs
         self.table_manager.populate_table(logs)
         self._reset_detail_panel()
@@ -446,6 +474,8 @@ class MainWindow(QMainWindow):
         self._select_first_log_row()
 
     def _reset_detail_panel(self):
+        # Clear the detail pane whenever the visible dataset changes so it never
+        # shows stale information from an earlier selection.
         self.detail_text.clear()
         self.detail_text.setPlainText(self.DEFAULT_DETAIL_TEXT)
 
@@ -455,6 +485,8 @@ class MainWindow(QMainWindow):
             self.table.selectRow(first_log_row)
 
     def on_table_selection_changed(self):
+        # Ask the table manager to translate the selected table row back to the
+        # underlying log entry. Header rows naturally resolve to None here.
         selected_indexes = self.table.selectionModel().selectedRows()
 
         if not selected_indexes:
@@ -472,6 +504,8 @@ class MainWindow(QMainWindow):
         )
 
     def open_group_window(self):
+        # Only open the grouping dialog when there is visible data to group.
+        # That keeps the flow simple and avoids empty dialogs.
         if not self.current_logs:
             return
 
@@ -482,6 +516,8 @@ class MainWindow(QMainWindow):
         self.group_window.show()
 
     def apply_group_filter(self, field, value):
+        # A group selection becomes another filtered view. The matching is done
+        # against the full loaded dataset so the result is stable and predictable.
         filtered = []
 
         for log in self.controller.all_logs:

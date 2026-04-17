@@ -8,6 +8,8 @@ from utils.file_utils import read_file_lines
 
 
 class SQLParser(BaseParser):
+    # Match a practical subset of INSERT statements that include column names
+    # and one or more parenthesized value groups.
     INSERT_REGEX = re.compile(
         r"INSERT\s+INTO\s+[`\"]?(?P<table>[A-Za-z0-9_]+)[`\"]?\s*"
         r"\((?P<columns>.*?)\)\s*VALUES\s*(?P<values>.*?);",
@@ -33,12 +35,15 @@ class SQLParser(BaseParser):
         if insert_entries:
             return insert_entries
 
-        # Fallback: als Textlog behandeln
+        # If no supported INSERT statements are found, fall back to the
+        # plain-text parser instead of rejecting the whole file.
         return self.text_parser.parse(file_path)
 
     def _parse_insert_statements(self, content: str, file_path: str) -> list[LogEntry]:
         entries: list[LogEntry] = []
 
+        # Convert each INSERT value group into one normalized log entry so SQL
+        # dumps can be browsed like any other source type.
         for match in self.INSERT_REGEX.finditer(content):
             table_name = match.group("table").strip()
             raw_columns = match.group("columns").strip()
@@ -61,6 +66,8 @@ class SQLParser(BaseParser):
 
                 row_data["table"] = table_name
 
+                # Build a readable pseudo-raw line instead of storing a fragment
+                # of the original SQL statement in the UI.
                 raw = f"INSERT_ROW table={table_name} | " + " | ".join(
                     f"{key}={value}" for key, value in row_data.items()
                 )
@@ -91,6 +98,8 @@ class SQLParser(BaseParser):
         return groups
 
     def _split_sql_values(self, value_group: str) -> list[str]:
+        # Split the value group on commas, but only when not currently inside
+        # a quoted SQL string.
         values = []
         current = []
         in_quotes = False
@@ -105,7 +114,7 @@ class SQLParser(BaseParser):
                     in_quotes = True
                     quote_char = char
                 elif quote_char == char:
-                    # Escaped quote like ''
+                    # SQL escapes quotes by doubling them inside the same string.
                     if i + 1 < len(value_group) and value_group[i + 1] == char:
                         current.append(char)
                         i += 1
@@ -137,7 +146,8 @@ class SQLParser(BaseParser):
         if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {"'", '"'}:
             cleaned = cleaned[1:-1]
 
-        # numerische Konvertierung
+        # Convert simple numeric strings up front so later comparisons and
+        # filters can treat them as numbers instead of plain text.
         if cleaned.isdigit():
             try:
                 return int(cleaned)

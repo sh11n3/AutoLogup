@@ -22,6 +22,8 @@ class XMLParser(BaseParser):
 
         record_elements = self._find_record_elements(root)
 
+        # Treat every detected record element as one log-like entry that can be
+        # normalized and shown in the shared table view.
         for element in record_elements:
             data = self._element_to_dict(element)
             if not data:
@@ -44,6 +46,8 @@ class XMLParser(BaseParser):
         if not children:
             return [root]
 
+        # Repeated sibling tags are a good hint that the XML contains a list of
+        # records rather than one nested document.
         tag_counts: dict[str, int] = {}
         for child in children:
             tag = self._strip_namespace(child.tag)
@@ -62,6 +66,8 @@ class XMLParser(BaseParser):
         return [root]
 
     def _element_to_dict(self, element: ET.Element, parent_key: str = "") -> dict:
+        # Flatten XML into dotted keys so nested values can still be filtered,
+        # grouped, and displayed consistently.
         data: dict = {}
         current_tag = self._strip_namespace(element.tag)
 
@@ -91,10 +97,12 @@ class XMLParser(BaseParser):
             raw_xml = ET.tostring(element, encoding="unicode")
             raw_xml = raw_xml.strip()
 
-            # Alle Zeilenumbrüche + überflüssige Leerzeichen zwischen Tags entfernen
+            # Remove line breaks and extra spacing between tags to keep the
+            # stored raw XML compact and readable in the UI.
             raw_xml = re.sub(r">\s+<", "><", raw_xml)
 
-            # Mehrfache Whitespaces innerhalb der Zeile reduzieren
+            # Collapse repeated whitespace in the remaining line without trying
+            # to fully reformat the XML.
             raw_xml = re.sub(r"\s+", " ", raw_xml)
 
             return raw_xml.strip()
@@ -102,6 +110,8 @@ class XMLParser(BaseParser):
             return ""
 
     def _strip_namespace(self, tag: str) -> str:
+        # Strip XML namespaces because the rest of the app works better with
+        # short, stable field names.
         if "}" in tag:
             return tag.split("}", 1)[1]
         return tag

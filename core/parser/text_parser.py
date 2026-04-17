@@ -7,12 +7,16 @@ from utils.file_utils import read_file_lines
 
 
 class TextParser(BaseParser):
+    # These regexes extract a small set of useful fields from plain-text log lines.
+    # The parser is intentionally conservative: it looks for common patterns
+    # without trying to fully understand every possible log format.
     IP_REGEX = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
     STATUS_REGEX = re.compile(r"\b(?:status=)?([1-5]\d{2})\b", re.IGNORECASE)
     LEVEL_REGEX = re.compile(r"\b(INFO|WARN|WARNING|ERROR|DEBUG|CRITICAL)\b", re.IGNORECASE)
     METHOD_REGEX = re.compile(r"\b(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\b", re.IGNORECASE)
 
-    # einfache Zeitformate für V1
+    # Plain-text parsing only supports a few common timestamp shapes.
+    # That keeps the extraction logic predictable and easy to debug.
     TIMESTAMP_REGEXES = [
         re.compile(r"\b\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}\b"),      # 2025-04-01 12:30:45
         re.compile(r"\b\d{2}/\d{2}/\d{4}[ T]\d{2}:\d{2}:\d{2}\b"),      # 01/04/2025 12:30:45
@@ -28,6 +32,8 @@ class TextParser(BaseParser):
         lines = read_file_lines(file_path)
         entries: list[LogEntry] = []
 
+        # In the plain-text parser, each non-empty line is treated as one
+        # independent log record.
         for line in lines:
             raw = line.strip()
 
@@ -45,6 +51,8 @@ class TextParser(BaseParser):
         return entries
 
     def _extract_fields(self, raw: str) -> dict:
+        # Extract a small field dictionary from the line before handing the
+        # result to the shared normalizer.
         data: dict = {}
 
         timestamp = self._extract_timestamp(raw)

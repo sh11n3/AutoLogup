@@ -8,6 +8,8 @@ from core.parser.xml_parser import XMLParser
 
 class ParserFactory:
     def __init__(self):
+        # The parsers are effectively stateless, so one shared instance per type
+        # is enough and keeps setup overhead small.
         self.text_parser = TextParser()
         self.json_parser = JSONParser()
         self.csv_parser = CSVParser()
@@ -17,6 +19,8 @@ class ParserFactory:
     def get_parser(self, file_path: str) -> BaseParser:
         lower_path = file_path.lower()
 
+        # Choose the parser by file extension. If the type is unknown, fall back
+        # to the plain-text parser because it is the safest generic option.
         if lower_path.endswith(".json"):
             return self.json_parser
 

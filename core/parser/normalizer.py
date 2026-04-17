@@ -2,6 +2,8 @@ from core.models.log_entry import LogEntry
 
 
 class Normalizer:
+    # These key sets define how source-specific field names are mapped onto the
+    # shared LogEntry structure used everywhere else in the app.
     USERNAME_KEYS = {"username", "user", "login", "account", "userid", "user_id"}
     IP_KEYS = {"ip", "ip_address", "client_ip", "source_ip", "src_ip", "remote_addr"}
     STATUS_KEYS = {"status", "status_code", "code", "response_code"}
@@ -12,6 +14,8 @@ class Normalizer:
     TIMESTAMP_KEYS = {"timestamp", "time", "datetime", "date", "created_at"}
 
     def normalize(self, data: dict, raw: str, source_file: str) -> LogEntry:
+        # Normalize incoming keys once up front so all later lookups become
+        # case-insensitive and consistent across different source formats.
         lowered = {str(k).strip().lower(): v for k, v in data.items()}
 
         timestamp = self._to_str(self._find_best_value(lowered, self.TIMESTAMP_KEYS))
@@ -40,12 +44,15 @@ class Normalizer:
         return entry
 
     def _find_best_value(self, data: dict, keys: set[str]):
-        # 1. exakter Key
+        # Try exact matches first, then fall back to flattened nested suffixes.
+        # That allows keys such as "user", "username", or "event.user" to feed
+        # the same normalized target field.
+        # First prefer an exact key match.
         for key in keys:
             if key in data:
                 return data[key]
 
-        # 2. suffix match für verschachtelte Keys wie event.ip / log.user
+        # Then allow suffix matches for flattened keys such as event.ip or log.user.
         for data_key, value in data.items():
             for key in keys:
                 if data_key.endswith(f".{key}") or data_key.endswith(f"@{key}") or data_key == key:
@@ -72,6 +79,8 @@ class Normalizer:
             return ""
 
         level = str(value).strip().upper()
+        # Normalize common synonyms so grouping and filtering do not split
+        # values such as WARN and WARNING into separate buckets.
         if level == "WARNING":
             return "WARN"
         return level
@@ -84,6 +93,9 @@ class Normalizer:
         return raw or ""
 
     def _build_extra(self, data: dict) -> dict:
+        # Keep every field that was not mapped into a fixed LogEntry attribute.
+        # This lets the UI still expose source-specific values for filtering,
+        # grouping, and inspection.
         known_keys = (
             self.TIMESTAMP_KEYS
             | self.USERNAME_KEYS
@@ -105,6 +117,8 @@ class Normalizer:
         return extra
 
     def _is_known_key(self, key: str, known_keys: set[str]) -> bool:
+        # Flattened keys that end in a known field name should not be copied
+        # into `extra`, because they already contributed to a normalized field.
         if key in known_keys:
             return True
 

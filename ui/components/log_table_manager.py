@@ -10,6 +10,8 @@ from ui.components.highlight_delegate import HighlightDelegate
 class LogTableManager:
     FILE_HEADER_PREFIX = "=== FILE: "
 
+    # Rotate row colors by source file so mixed datasets remain visually readable
+    # without needing multiple tabs or separate tables.
     FILE_COLOR_THEMES = [
         ("#0b1830", "#132445", "#3b82f6"),
         ("#0d2416", "#153520", "#22c55e"),
@@ -21,12 +23,16 @@ class LogTableManager:
 
     def __init__(self, table):
         self.table = table
+        # These lookup maps hide the fact that the visible table contains extra
+        # synthetic header rows that do not correspond to real log entries.
         self.row_to_log_index = {}
         self.log_index_to_row = {}
 
     def populate_table(self, logs):
         visible_logs = logs or []
 
+        # Rebuild the visible table from scratch every time the dataset changes.
+        # This keeps grouping, filtering, and file headers in sync in one place.
         self.row_to_log_index = {}
         self.log_index_to_row = {}
         self.table.setRowCount(0)
@@ -38,6 +44,8 @@ class LogTableManager:
         for log_index, log in enumerate(visible_logs):
             source_file = log.source_file or ""
 
+            # Insert a synthetic file header row whenever the visible source file
+            # changes while walking the dataset.
             if source_file != last_source:
                 header_row = self.table.rowCount()
                 self.table.insertRow(header_row)
@@ -61,6 +69,7 @@ class LogTableManager:
         self.table.viewport().update()
 
     def first_actual_log_row(self):
+        # Return the first real data row, not one of the synthetic file headers.
         for row in range(self.table.rowCount()):
             if row in self.row_to_log_index:
                 return row
@@ -76,6 +85,8 @@ class LogTableManager:
         return self.log_index_to_row.get(log_index)
 
     def _create_header_item(self, source_file: str):
+        # Header rows exist only for readability in the table and should never
+        # be treated like real log entries.
         file_name = Path(source_file).name if source_file else "(unknown file)"
         item = QTableWidgetItem(f"{self.FILE_HEADER_PREFIX}{file_name} ===")
         item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
@@ -84,6 +95,8 @@ class LogTableManager:
         return item
 
     def _create_log_item(self, raw_text: str, file_index: int, row_in_file: int):
+        # Use alternating shades inside one file and a stable accent color per
+        # file group to make long mixed tables easier to scan.
         item = QTableWidgetItem(raw_text)
         item.setToolTip(raw_text)
 
@@ -95,6 +108,8 @@ class LogTableManager:
         return item
 
     def _build_file_index_map(self, logs):
+        # Assign each visible source file a stable color index for the current
+        # render pass of the table.
         file_index_map = {}
         next_index = 0
 
@@ -111,6 +126,8 @@ class LogTableManager:
             self.table.setColumnWidth(0, 1200)
             return
 
+        # Size the raw-log column from the widest visible entry, but clamp it to
+        # a reasonable range so very long rows do not make the table unusable.
         metrics = QFontMetrics(self.table.font())
         max_width = metrics.horizontalAdvance(f"{self.FILE_HEADER_PREFIX}EXAMPLE ===")
 

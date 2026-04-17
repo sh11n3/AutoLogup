@@ -19,6 +19,8 @@ class CSVParser(BaseParser):
                 if reader.fieldnames is None:
                     return []
 
+                # Read one dictionary-style row at a time and normalize it into
+                # the shared log model used by the rest of the application.
                 for row in reader:
                     if row is None:
                         continue
@@ -42,6 +44,8 @@ class CSVParser(BaseParser):
         return entries
 
     def _clean_row(self, row: dict) -> dict:
+        # Clean up CSV keys and values before normalization. This keeps later
+        # filtering and grouping from depending on small formatting differences.
         cleaned = {}
 
         for key, value in row.items():
@@ -55,13 +59,16 @@ class CSVParser(BaseParser):
             else:
                 cleaned[normalized_key] = str(value).strip()
 
-        # Prüfen, ob die Zeile komplett leer ist
+        # Drop rows that are technically present in the file but contain no data.
         if all(value == "" for value in cleaned.values()):
             return {}
 
         return cleaned
 
     def _build_raw_line(self, row: dict) -> str:
+        # Reconstruct a readable one-line representation of the row.
+        # CSV files do not naturally have a raw log line, so this gives the UI
+        # something useful to display in the table and detail view.
         parts = []
 
         for key, value in row.items():

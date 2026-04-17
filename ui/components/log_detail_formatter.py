@@ -4,6 +4,9 @@ from xml.dom import minidom
 
 class LogDetailFormatter:
     def format_log_details(self, log) -> str:
+        # Build the full text shown in the detail pane. The output is meant to
+        # give a quick overview of normalized fields, any preserved extra fields,
+        # and the raw payload in a readable order.
         source_file = log.source_file or ""
 
         detail_lines = [
@@ -40,6 +43,8 @@ class LogDetailFormatter:
     def _format_raw_text(self, raw_text: str, source_file: str) -> str:
         lower_source = source_file.lower()
 
+        # Use the source file extension as a lightweight hint for whether the
+        # raw payload should be pretty-printed.
         if lower_source.endswith(".json"):
             return self._pretty_json(raw_text)
 
@@ -53,6 +58,8 @@ class LogDetailFormatter:
             parsed = json.loads(raw_text)
             return json.dumps(parsed, indent=4, ensure_ascii=False)
         except Exception:
+            # If the payload cannot be parsed as JSON, keep the original text
+            # instead of hiding information from the user.
             return raw_text
 
     def _pretty_xml(self, raw_text: str) -> str:
@@ -62,4 +69,6 @@ class LogDetailFormatter:
             lines = [line for line in pretty.splitlines() if line.strip()]
             return "\n".join(lines)
         except Exception:
+            # Invalid or partial XML should still be shown as-is so the detail
+            # view remains useful even for imperfect data.
             return raw_text

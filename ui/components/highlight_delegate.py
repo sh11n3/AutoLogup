@@ -4,6 +4,8 @@ from PySide6.QtCore import Qt, QRect
 
 
 class HighlightDelegate(QStyledItemDelegate):
+    # Custom item roles allow the table manager to attach display metadata to
+    # each row without having to introduce a dedicated model class.
     BG_ROLE = Qt.UserRole + 1
     STRIPE_ROLE = Qt.UserRole + 2
 
@@ -13,6 +15,8 @@ class HighlightDelegate(QStyledItemDelegate):
         self.mode = "contains"
 
     def set_search(self, text: str, mode: str):
+        # Cache the current search state in a normalized form so the delegate
+        # can use it both for hit detection and custom painting.
         self.search_text = (text or "").lower()
         self.mode = mode
 
@@ -22,6 +26,8 @@ class HighlightDelegate(QStyledItemDelegate):
 
         text_lower = text.lower()
 
+        # Exact mode matches token boundaries, while contains mode highlights
+        # any matching substring inside the row text.
         if self.mode == "exact":
             return self.search_text in text_lower.split()
         return self.search_text in text_lower
@@ -31,7 +37,7 @@ class HighlightDelegate(QStyledItemDelegate):
 
         text = index.data(Qt.DisplayRole) or ""
 
-        # Hintergrundfarbe aus Model holen
+        # Read per-row colors from the custom roles assigned by the table manager.
         bg_hex = index.data(self.BG_ROLE)
         stripe_hex = index.data(self.STRIPE_ROLE)
 
@@ -43,7 +49,8 @@ class HighlightDelegate(QStyledItemDelegate):
             painter.fillRect(option.rect, bg_color)
             text_color = option.palette.text().color()
 
-        # farbiger Datei-Streifen links
+        # Draw a colored stripe at the left edge so entries from different
+        # source files are easier to tell apart while scanning the table.
         if stripe_hex:
             stripe_rect = QRect(option.rect.left(), option.rect.top(), 8, option.rect.height())
             painter.fillRect(stripe_rect, QColor(stripe_hex))
@@ -62,6 +69,8 @@ class HighlightDelegate(QStyledItemDelegate):
         search = self.search_text
         i = 0
 
+        # Paint the text piece by piece so matching fragments can be given
+        # their own highlight background.
         while i < len(text):
             if self.mode == "exact":
                 idx = self._find_exact(text_lower, search, i)
@@ -97,6 +106,8 @@ class HighlightDelegate(QStyledItemDelegate):
         painter.restore()
 
     def _find_exact(self, text_lower: str, search: str, start: int) -> int:
+        # Exact mode uses a lightweight word-boundary check instead of a full
+        # regex tokenizer. That keeps the delegate fast and easy to reason about.
         idx = text_lower.find(search, start)
 
         while idx != -1:

@@ -20,16 +20,22 @@ class SearchManager:
         self.search_result_label = search_result_label
         self.highlight_delegate = highlight_delegate
 
+        # Keep search state in a dedicated helper so the main window does not
+        # have to manage match lists, indexes, and navigation itself.
         self.visible_logs = []
         self.search_match_rows = []
         self.current_search_match_index = -1
 
     def open_search_bar(self):
+        # Show the search UI and focus the input immediately so Ctrl+F behaves
+        # like users expect from desktop applications.
         self.search_container.setVisible(True)
         self.search_input.setFocus()
         self.search_input.selectAll()
 
     def close_search_bar(self):
+        # Reset the visible search controls and the delegate's highlight state
+        # together so the table always reflects the actual UI state.
         self.search_input.clear()
         self.search_container.setVisible(False)
         self.highlight_delegate.set_search("", "contains")
@@ -44,6 +50,8 @@ class SearchManager:
             self.close_search_bar()
 
     def set_visible_logs(self, logs):
+        # Rebuild matches whenever the visible dataset changes because both the
+        # content and the corresponding table rows may have shifted.
         self.visible_logs = logs or []
         self._rebuild_search_matches()
 
@@ -91,6 +99,9 @@ class SearchManager:
             self._update_search_result_label()
             return
 
+        # Translate matching log indexes into real table rows. This step matters
+        # because the table contains extra file-header rows that are not part of
+        # the underlying log list.
         for log_index, log in enumerate(self.visible_logs):
             raw_text = log.raw or ""
             if not self.highlight_delegate.row_has_match(raw_text):
@@ -120,6 +131,8 @@ class SearchManager:
             return
 
         row = self.search_match_rows[match_index]
+        # Preserve the horizontal scroll position so navigating search results
+        # does not constantly snap the user back to the left edge.
         h_scroll = self.table.horizontalScrollBar().value()
 
         self.table.selectRow(row)

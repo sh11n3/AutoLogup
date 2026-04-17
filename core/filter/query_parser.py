@@ -1,4 +1,6 @@
 class QueryParser:
+    # Word-based operators are normalized so the filter engine only has to deal
+    # with one internal operator name for each logical operation.
     WORD_OPERATORS = {
         "contains": "contains",
         "startswith": "startswith",
@@ -21,9 +23,13 @@ class QueryParser:
         if expression is None or self.position != self.length:
             return None
 
+        # Return a small expression tree that the filter engine can evaluate.
+        # A failed parse returns None so invalid queries can safely fall back.
         return expression
 
     def _parse_or_expression(self) -> dict | None:
+        # Parse OR at the top level so AND binds more strongly than OR.
+        # That gives the usual boolean precedence without extra work in evaluation.
         left = self._parse_and_expression()
         if left is None:
             return None
@@ -65,6 +71,8 @@ class QueryParser:
         self._skip_whitespace()
 
         if self._peek() == "(":
+            # Parentheses start a nested expression and override the normal
+            # boolean precedence for that part of the query.
             self.position += 1
             expression = self._parse_or_expression()
             self._skip_whitespace()
@@ -113,6 +121,8 @@ class QueryParser:
     def _parse_operator(self) -> str | None:
         self._skip_whitespace()
 
+        # Check symbol operators first so longer operators such as ">=" or "!="
+        # are matched before their shorter prefixes.
         for operator in self.SYMBOL_OPERATORS:
             if self.query.startswith(operator, self.position):
                 self.position += len(operator)
@@ -134,6 +144,8 @@ class QueryParser:
             return None
 
         if self._peek() in {'"', "'"}:
+            # Quoted values can contain spaces, regex characters, and words that
+            # would otherwise look like boolean operators.
             return self._parse_quoted_value()
 
         start = self.position
@@ -148,6 +160,8 @@ class QueryParser:
                 checkpoint = self.position
                 self._skip_whitespace()
 
+                # Stop only when the following token clearly begins a boolean
+                # operator or a closing parenthesis.
                 if self._is_boolean_operator_boundary() or self._peek() == ")":
                     self.position = checkpoint
                     break
@@ -168,6 +182,8 @@ class QueryParser:
             char = self.query[self.position]
 
             if char == "\\" and self.position + 1 < self.length:
+                # Keep escape handling intentionally simple so quoted regexes
+                # and embedded quotes can still be written inline.
                 self.position += 1
                 chars.append(self.query[self.position])
                 self.position += 1

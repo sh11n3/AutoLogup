@@ -6,6 +6,10 @@ from core.models.log_entry import LogEntry
 
 
 class FilterEngine:
+    # Support a small set of common timestamp formats so range filters can work
+    # even when logs come from different sources with different date conventions.
+    # The goal is not to be exhaustive, but to cover the formats this project
+    # already extracts or is likely to encounter in sample data.
     DATETIME_FORMATS = (
         "%Y-%m-%dT%H:%M:%S",
         "%Y-%m-%dT%H:%M",
@@ -36,6 +40,8 @@ class FilterEngine:
 
         result = []
 
+        # Evaluate the parsed query tree against every log entry and keep only
+        # the rows that satisfy the full expression.
         for log in logs:
             if self._matches(log, expression):
                 result.append(log)
@@ -48,6 +54,8 @@ class FilterEngine:
         if node_type == "binary":
             operator = node["operator"]
 
+            # Precedence and grouping have already been resolved by the parser,
+            # so evaluation only needs to follow the tree structure.
             if operator == "AND":
                 return self._matches(log, node["left"]) and self._matches(log, node["right"])
 
@@ -71,6 +79,8 @@ class FilterEngine:
         if actual_value is None:
             return False
 
+        # Route equality and ordering through the same comparison helper so
+        # numbers, timestamps, and strings all follow one consistent path.
         if operator == "=":
             return self._compare_values(field, actual_value, expected_value) == 0
 
@@ -89,6 +99,8 @@ class FilterEngine:
 
         if operator == "regex":
             try:
+                # Regex matching is case-insensitive by default so it behaves
+                # like the rest of the text-based operators in the app.
                 return re.search(expected_value, str(actual_value), re.IGNORECASE) is not None
             except re.error:
                 return False
@@ -116,6 +128,9 @@ class FilterEngine:
         if field in log.extra:
             return log.extra[field]
 
+        # Extra fields may come from flattened structures such as JSON or XML.
+        # Matching by suffix lets queries like `gender=male` work for keys such
+        # as `profile.gender` without forcing the user to know the full path.
         for extra_key, value in log.extra.items():
             normalized_key = str(extra_key).strip().lower()
             if normalized_key.endswith(f".{field}") or normalized_key.endswith(f"@{field}"):
@@ -124,6 +139,9 @@ class FilterEngine:
         return None
 
     def _compare_values(self, field: str, actual_value, expected_value) -> int:
+        # Timestamp fields should be compared as real dates whenever possible.
+        # If parsing fails, the code falls back to numeric or string comparison
+        # instead of crashing or silently discarding the condition.
         actual_datetime = self._to_datetime(actual_value) if field == "timestamp" else None
         expected_datetime = self._to_datetime(expected_value) if field == "timestamp" else None
 
@@ -147,6 +165,8 @@ class FilterEngine:
         return 0
 
     def _to_number(self, value):
+        # Avoid treating booleans as numbers. In Python, bool is a subclass of int,
+        # but that would be surprising in query filters.
         if isinstance(value, bool):
             return None
 
@@ -174,6 +194,8 @@ class FilterEngine:
         except ValueError:
             pass
 
+        # Try a few explicit formats after ISO parsing. This keeps the accepted
+        # date set predictable and easy to reason about.
         for datetime_format in self.DATETIME_FORMATS:
             try:
                 return datetime.strptime(text, datetime_format)
