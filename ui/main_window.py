@@ -67,7 +67,7 @@ class MainWindow(QMainWindow):
 
         self.filter_input = QLineEdit()
         self.filter_input.setPlaceholderText(
-            "Filter (z.B. status=401 AND ip=1.1.1.1 | message~failed)"
+            "Filter (z.B. (username=tim AND status>=401) OR message contains failed)"
         )
         self.filter_input.returnPressed.connect(self.apply_filter)
 

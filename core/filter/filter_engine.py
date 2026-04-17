@@ -1,8 +1,25 @@
-from core.models.log_entry import LogEntry
+import re
+from datetime import datetime
+
 from core.filter.query_parser import QueryParser
+from core.models.log_entry import LogEntry
 
 
 class FilterEngine:
+    DATETIME_FORMATS = (
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+        "%m/%d/%Y %H:%M:%S",
+        "%m/%d/%Y %H:%M",
+        "%m/%d/%Y",
+        "%d.%m.%Y %H:%M:%S",
+        "%d.%m.%Y %H:%M",
+        "%d.%m.%Y",
+    )
+
     def __init__(self):
         self.query_parser = QueryParser()
 
@@ -12,37 +29,37 @@ class FilterEngine:
         if not query:
             return logs
 
-        conditions, operators = self.query_parser.parse(query)
+        expression = self.query_parser.parse(query)
 
-        if not conditions:
+        if not expression:
             return logs
 
         result = []
 
         for log in logs:
-            if self._matches(log, conditions, operators):
+            if self._matches(log, expression):
                 result.append(log)
 
         return result
 
-    def _matches(self, log: LogEntry, conditions: list[dict], operators: list[str]) -> bool:
-        evaluations = [self._match_condition(log, condition) for condition in conditions]
+    def _matches(self, log: LogEntry, node: dict) -> bool:
+        node_type = node.get("type")
 
-        if not evaluations:
-            return True
-
-        result = evaluations[0]
-
-        for index, operator in enumerate(operators):
-            if index + 1 >= len(evaluations):
-                break
+        if node_type == "binary":
+            operator = node["operator"]
 
             if operator == "AND":
-                result = result and evaluations[index + 1]
-            elif operator == "OR":
-                result = result or evaluations[index + 1]
+                return self._matches(log, node["left"]) and self._matches(log, node["right"])
 
-        return result
+            if operator == "OR":
+                return self._matches(log, node["left"]) or self._matches(log, node["right"])
+
+            return False
+
+        if node_type == "condition":
+            return self._match_condition(log, node)
+
+        return False
 
     def _match_condition(self, log: LogEntry, condition: dict) -> bool:
         field = condition["field"]
@@ -54,23 +71,39 @@ class FilterEngine:
         if actual_value is None:
             return False
 
-        # Exakter Vergleich
         if operator == "=":
-            if isinstance(actual_value, int):
-                try:
-                    return actual_value == int(expected_value)
-                except ValueError:
-                    return False
+            return self._compare_values(field, actual_value, expected_value) == 0
 
-            actual_str = str(actual_value).strip().lower()
-            expected_str = str(expected_value).strip().lower()
-            return actual_str == expected_str
+        if operator == "!=":
+            return self._compare_values(field, actual_value, expected_value) != 0
 
-        # Contains / substring
-        if operator == "~":
+        if operator == "contains":
             actual_str = str(actual_value).strip().lower()
             expected_str = str(expected_value).strip().lower()
             return expected_str in actual_str
+
+        if operator == "startswith":
+            actual_str = str(actual_value).strip().lower()
+            expected_str = str(expected_value).strip().lower()
+            return actual_str.startswith(expected_str)
+
+        if operator == "regex":
+            try:
+                return re.search(expected_value, str(actual_value), re.IGNORECASE) is not None
+            except re.error:
+                return False
+
+        if operator == ">":
+            return self._compare_values(field, actual_value, expected_value) > 0
+
+        if operator == ">=":
+            return self._compare_values(field, actual_value, expected_value) >= 0
+
+        if operator == "<":
+            return self._compare_values(field, actual_value, expected_value) < 0
+
+        if operator == "<=":
+            return self._compare_values(field, actual_value, expected_value) <= 0
 
         return False
 
@@ -87,5 +120,64 @@ class FilterEngine:
             normalized_key = str(extra_key).strip().lower()
             if normalized_key.endswith(f".{field}") or normalized_key.endswith(f"@{field}"):
                 return value
+
+        return None
+
+    def _compare_values(self, field: str, actual_value, expected_value) -> int:
+        actual_datetime = self._to_datetime(actual_value) if field == "timestamp" else None
+        expected_datetime = self._to_datetime(expected_value) if field == "timestamp" else None
+
+        if actual_datetime is not None and expected_datetime is not None:
+            return self._compare_order(actual_datetime, expected_datetime)
+
+        actual_number = self._to_number(actual_value)
+        expected_number = self._to_number(expected_value)
+        if actual_number is not None and expected_number is not None:
+            return self._compare_order(actual_number, expected_number)
+
+        actual_str = str(actual_value).strip().lower()
+        expected_str = str(expected_value).strip().lower()
+        return self._compare_order(actual_str, expected_str)
+
+    def _compare_order(self, actual, expected) -> int:
+        if actual < expected:
+            return -1
+        if actual > expected:
+            return 1
+        return 0
+
+    def _to_number(self, value):
+        if isinstance(value, bool):
+            return None
+
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        try:
+            return float(str(value).strip())
+        except (TypeError, ValueError):
+            return None
+
+    def _to_datetime(self, value):
+        if isinstance(value, datetime):
+            return value
+
+        if value is None:
+            return None
+
+        text = str(value).strip()
+        if not text:
+            return None
+
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+
+        for datetime_format in self.DATETIME_FORMATS:
+            try:
+                return datetime.strptime(text, datetime_format)
+            except ValueError:
+                continue
 
         return None
