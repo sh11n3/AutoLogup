@@ -83,4 +83,9 @@ class FilterEngine:
         if field in log.extra:
             return log.extra[field]
 
+        for extra_key, value in log.extra.items():
+            normalized_key = str(extra_key).strip().lower()
+            if normalized_key.endswith(f".{field}") or normalized_key.endswith(f"@{field}"):
+                return value
+
         return None

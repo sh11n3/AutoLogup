@@ -2,7 +2,7 @@ from core.models.log_entry import LogEntry
 
 
 class Normalizer:
-    USERNAME_KEYS = {"username", "user", "login", "account", "userid", "user_id", "gender"}
+    USERNAME_KEYS = {"username", "user", "login", "account", "userid", "user_id"}
     IP_KEYS = {"ip", "ip_address", "client_ip", "source_ip", "src_ip", "remote_addr"}
     STATUS_KEYS = {"status", "status_code", "code", "response_code"}
     METHOD_KEYS = {"method", "http_method", "verb"}
